@@ -1,0 +1,1 @@
+/usr/bin/cc CMakeFiles/SimpleHttp.dir/main.c.o CMakeFiles/SimpleHttp.dir/Server.c.o -o SimpleHttp 

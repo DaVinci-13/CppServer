@@ -1,0 +1,3 @@
+/home/zixuan/Desktop/Cpp/SimpleHttp/build/CMakeFiles/SimpleHttp.dir
+/home/zixuan/Desktop/Cpp/SimpleHttp/build/CMakeFiles/edit_cache.dir
+/home/zixuan/Desktop/Cpp/SimpleHttp/build/CMakeFiles/rebuild_cache.dir
