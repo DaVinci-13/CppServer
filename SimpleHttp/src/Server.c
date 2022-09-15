@@ -12,6 +12,13 @@
 #include <dirent.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <pthread.h>
+
+struct FdInfo
+{
+    int tid,fd,epfd;
+};
+
 
 int initListenFd(unsigned short port)
 {
@@ -51,6 +58,7 @@ int initListenFd(unsigned short port)
     return lfd;
 }
 
+
 int epollRun(int lfd)
 {
     printf("Run epoll\n");
@@ -79,13 +87,21 @@ int epollRun(int lfd)
         for (int i = 0; i < num; i++)
         {
             int fd=evs[i].data.fd;
+
+            struct FdInfo* info=(struct FdInfo*)malloc(sizeof(struct FdInfo));
+            info->epfd=epfd;
+            info->fd=fd;
             if(fd==lfd)
             {
                 //construct connection
-                acceptClient(lfd,epfd);
+                
+                //acceptClient(lfd,epfd);
+                pthread_create(&info->tid,NULL,acceptClient,info);
             }else{
                 //recive message
-                recvHttpReuqest(fd,epfd);
+                
+                //recvHttpReuqest(fd,epfd);
+                pthread_create(&info->tid,NULL,recvHttpReuqest,info);
             }
         }
         
@@ -93,11 +109,12 @@ int epollRun(int lfd)
     return 0;
 }
 
-int acceptClient(int lfd,int epfd)
+void* acceptClient(void* arg)
 {
+    struct FdInfo* info=(struct FdInfo*)arg;
     printf("accept connection...");
     //set accept
-    int cfd=accept(lfd,NULL,NULL);
+    int cfd=accept(info->fd,NULL,NULL);
     if(cfd==-1)
     {
         perror("accept");
@@ -111,22 +128,24 @@ int acceptClient(int lfd,int epfd)
     struct epoll_event ev;
     ev.data.fd=cfd;
     ev.events=EPOLLIN | EPOLLET; //EPOLLET:bianyan model
-    int ret=epoll_ctl(epfd,EPOLL_CTL_ADD,cfd,&ev);
+    int ret=epoll_ctl(info->epfd,EPOLL_CTL_ADD,cfd,&ev);
     if(ret==-1)
     {
         perror("epoll ctl cfd");
         return -1;
     }
+    free(info);
     return 0;
 }
 
-int recvHttpReuqest(int cfd, int epfd)
+void* recvHttpReuqest(void* arg)
 {
+    struct FdInfo* info=(struct FdInfo*)arg;
     printf("beigin receive data ...");
     int len=0,total;
     char tmp[1024]={0};
     char buf[4096]={0};
-    while((len=recv(cfd,tmp,sizeof tmp,0))>0)
+    while((len=recv(info->fd,tmp,sizeof tmp,0))>0)
     {
         if(total+len<sizeof buf)
         {
@@ -134,26 +153,27 @@ int recvHttpReuqest(int cfd, int epfd)
         }
         total+=len;
 
-        //if data receive complish
-        if(len==-1 && errno==EAGAIN)
-        {
-            //Analys Request Handle
-            char* pt=strstr(buf,"\r\n");
-            int reqLen=pt-buf;
-            buf[reqLen]='\0';
-            parseRequestLine(buf,cfd);
-        }
-        else if(len==0)
-        {
-            //client close connection
-            epoll_ctl(epfd,EPOLL_CTL_DEL,cfd,NULL);
-            close(cfd);
-        }
-        else
-        {
-            perror("receive http request");            
-        }
     }
+    //if data receive complish
+    if(len==-1 && errno==EAGAIN)
+    {
+        //Analys Request Handle
+        char* pt=strstr(buf,"\r\n");
+        int reqLen=pt-buf;
+        buf[reqLen]='\0';
+        parseRequestLine(buf,info->fd);
+    }
+    else if(len==0)
+    {
+        //client close connection
+        epoll_ctl(info->epfd,EPOLL_CTL_DEL,info->fd,NULL);
+        close(info->fd);
+    }
+    else
+    {
+        perror("receive http request");            
+    }
+    free(info);
     return 0;
 }
 
@@ -167,6 +187,9 @@ int parseRequestLine(const char* line, int cfd)
     {
         return -1;
     }
+
+    urldecode(path);
+
     // handle static res
     char* file=NULL;
     if(strcmp(path,"/")==0){
@@ -290,4 +313,79 @@ int sendDir(const char* dirname,int cfd)
     send(cfd, buf, strlen(buf), 0);
     free(namelist);
     
+}
+
+static int hex2dec (char c) {
+    if ('0' <= c && c <= '9') return c - '0';
+    else if ('a' <= c && c <= 'f') return c - 'a' + 10;
+    else if ('A' <= c && c <= 'F') return c - 'A' + 10;
+    return 0;
+}
+ 
+static char dec2hex (short int c) {
+    if (0 <= c && c <= 9) return c + '0';
+    else if (10 <= c && c <= 15) return c + 'A' - 10;
+    return 0;
+}
+ //编码一个url
+void urlencode(char* url)
+{
+    int i = 0;
+    int len = strlen(url);
+    int res_len = 0;
+    unsigned char* res = (unsigned char*)malloc(3*len+1);        // 动态分配3倍的长度 
+    for (i = 0; i < len; ++i) 
+    {
+        char c = url[i];
+        if (    ('0' <= c && c <= '9') ||
+                ('a' <= c && c <= 'z') ||
+                ('A' <= c && c <= 'Z') || 
+                c == '/' || c == '.') 
+        {
+            res[res_len++] = c;
+        } 
+        else 
+        {
+            int j = (short int)c;
+            if (j < 0)
+                j += 256;
+            int i1, i0;
+            i1 = j / 16;
+            i0 = j - i1 * 16;
+            res[res_len++] = '%';
+            res[res_len++] = dec2hex(i1);
+            res[res_len++] = dec2hex(i0);
+        }
+    }
+    res[res_len] = '\0';
+    strcpy(url, (const char*)res);
+    free(res);
+}
+
+// 解码url 
+void urldecode(char* url)
+{
+    int i = 0;
+    unsigned int len = strlen(url);       // 长度 
+    int res_len = 0;
+    unsigned char* res = (unsigned char*)malloc(len+1);        // 动态分配同样的长度 
+    for (i = 0; i < len; ++i) 
+    {
+        char c = url[i];
+        if (c != '%') 
+        {
+            res[res_len++] = c;
+        }
+        else 
+        {
+            char c1 = url[++i];
+            char c0 = url[++i];
+            int num = 0;
+            num = hex2dec(c1) * 16 + hex2dec(c0);
+            res[res_len++] = num;
+        }
+    }
+    res[res_len] = '\0';
+    strcpy(url, (const char*)res);
+    free(res);
 }

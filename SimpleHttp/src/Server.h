@@ -4,9 +4,9 @@ int initListenFd(unsigned short port);
 
 int epollRun(int lfd);
 
-int acceptClient(int lfd, int epfd);
+void* acceptClient(void* arg);
 
-int recvHttpReuqest(int cfd, int epfd);
+void* recvHttpReuqest(void* arg);
 
 int parseRequestLine(const char* line, int cfd);
 
@@ -17,3 +17,6 @@ int sendHeadMsg(int cfd, int status, const char* descr, const char* type, int le
 int sendDir(const char* dirname,int cfd);
 
 const char* getFileType(const char* name);
+
+void urldecode(char* url);
+void urlencode(char* url);
